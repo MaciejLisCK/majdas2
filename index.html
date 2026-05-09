@@ -85,6 +85,7 @@ const BLOCK_SIZE = 46;
 const STAGE_BG    = ['#FFB6D9','#FFF176','#B3E5FC','#C8E6C9','#FFCDD2'];
 const STAGE_TILE  = ['#F06292','#F9A825','#0288D1','#388E3C','#E53935'];
 const STAGE_DARK  = ['#C2185B','#F57F17','#01579B','#1B5E20','#B71C1C'];
+const STAGE_LIGHT = ['#F8BBD0','#FFF9C4','#B3E5FC','#DCEDC8','#FFCDD2'];
 const STAGE_NAMES = ['Różowy','Żółty','Niebieski','Zielony','Czerwony'];
 
 const SKIN_COLORS  = ['#FFE4C8','#F5C29A','#C8956C','#8D5524','#5C3317'];
@@ -309,44 +310,88 @@ function drawScene() {
     }
   }
 
-  // Ground tiles
+  // Ground tiles – 3D block style
+  const light = STAGE_LIGHT[stageIdx];
+  const topH = 10;
   for (let bx = -((camX|0) % BS); bx < W + BS; bx += BS) {
+    // Top face (catches light)
+    ctx.fillStyle = light;
+    ctx.fillRect(bx + 1, GROUND, BS - 1, topH);
+    // Front face
     ctx.fillStyle = tile;
-    ctx.fillRect(bx, GROUND, BS, BS);
+    ctx.fillRect(bx + 1, GROUND + topH, BS - 1, BS - topH);
+    // Bottom shadow strip
     ctx.fillStyle = dark;
-    ctx.fillRect(bx, GROUND, BS, 5);
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    ctx.fillRect(bx, GROUND, BS, 2);
-
-    ctx.fillStyle = dark;
+    ctx.fillRect(bx + 1, GROUND + BS - 5, BS - 1, 5);
+    // Fill below
     ctx.fillRect(bx, GROUND + BS, BS, H);
+    // Left seam shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.14)';
+    ctx.fillRect(bx, GROUND, 2, H - GROUND);
   }
-  // Tile grid lines
-  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-  ctx.lineWidth = 1;
-  for (let bx = -((camX|0) % BS); bx < W + BS; bx += BS) {
-    ctx.beginPath(); ctx.moveTo(bx, GROUND); ctx.lineTo(bx, H); ctx.stroke();
-  }
+  // Horizontal crease between top-face and front-face
+  ctx.fillStyle = 'rgba(0,0,0,0.13)';
+  ctx.fillRect(0, GROUND + topH, W, 1);
 
-  // Obstacles (brick wall)
+  // Obstacles – 3D brick wall
   for (const obs of obstacles) {
     if (obs.passed) continue;
     const sx = obs.x - camX;
-    if (sx > W + 10 || sx + obs.w < -10) continue;
+    if (sx > W + 50 || sx + obs.w + 14 < -10) continue;
+    const dep = 11; // depth of 3D extrusion
+
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(sx + dep + 3, obs.y - dep + 4, 4, obs.h + dep - 4);
+
+    // Right side face
+    ctx.fillStyle = '#6b1c16';
+    ctx.fillRect(sx + obs.w, obs.y + dep, dep, obs.h - dep);
+
+    // Top face (parallelogram)
+    ctx.fillStyle = '#8e2d25';
+    ctx.beginPath();
+    ctx.moveTo(sx,            obs.y);
+    ctx.lineTo(sx + obs.w,    obs.y);
+    ctx.lineTo(sx + obs.w + dep, obs.y - dep);
+    ctx.lineTo(sx + dep,      obs.y - dep);
+    ctx.closePath();
+    ctx.fill();
+    // Top face highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.moveTo(sx,            obs.y);
+    ctx.lineTo(sx + obs.w,    obs.y);
+    ctx.lineTo(sx + obs.w + dep, obs.y - dep);
+    ctx.lineTo(sx + dep,      obs.y - dep);
+    ctx.closePath();
+    ctx.fill();
+
+    // Front face – bricks
     ctx.fillStyle = '#c0392b';
     ctx.fillRect(sx, obs.y, obs.w, obs.h);
-    ctx.fillStyle = '#962d22';
     const rh = 14;
     for (let row = 0; row < obs.h; row += rh) {
-      const off = Math.floor(row/rh) % 2 === 0 ? 0 : 16;
-      for (let col = off - 32; col < obs.w + 10; col += 34) {
+      const off = Math.floor(row/rh) % 2 === 0 ? 0 : 17;
+      for (let col = off - 34; col < obs.w + 10; col += 34) {
+        // Mortar
         ctx.strokeStyle = '#7d241e';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(sx + col, obs.y + row, 33, rh - 1);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(sx + col + 0.5, obs.y + row + 0.5, 33, rh - 1);
+        // Brick top sheen
+        ctx.fillStyle = 'rgba(255,255,255,0.07)';
+        ctx.fillRect(sx + col + 1, obs.y + row + 1, 31, 4);
+        // Brick bottom shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+        ctx.fillRect(sx + col + 1, obs.y + row + rh - 5, 31, 4);
       }
     }
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(sx, obs.y, obs.w, 3);
+    // Left highlight stripe
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(sx, obs.y, 3, obs.h);
+    // Right shadow stripe on front face
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(sx + obs.w - 3, obs.y, 3, obs.h);
   }
 
   // Choice orbs
@@ -405,105 +450,250 @@ function drawScene() {
   }
 }
 
-// ─── Character drawing ────────────────────────────────────
+// ─── Character drawing (3D shading) ──────────────────────
 function drawCharAt(sx, sy, c) {
   const sk = SKIN_COLORS[c.skin];
 
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.beginPath();
-  ctx.ellipse(sx + PL_W/2, GROUND+3, 14, 5, 0, 0, Math.PI*2);
-  ctx.fill();
-
-  // Legs
-  const legCol = c.pants > 0 ? PANTS_COLORS[c.pants] : sk;
-  ctx.fillStyle = legCol;
-  ctx.fillRect(sx+4,  sy+35, 9, 19);
-  ctx.fillRect(sx+15, sy+35, 9, 19);
-  // Shoes
-  ctx.fillStyle = '#2c3e50';
-  ctx.fillRect(sx+2,  sy+52, 13, 4);
-  ctx.fillRect(sx+13, sy+52, 13, 4);
-
-  // Body / top
-  const topCol = c.top > 0 ? TOP_COLORS[c.top] : sk;
-  ctx.fillStyle = topCol;
-  if (c.top === 4) { // dress
-    ctx.beginPath();
-    ctx.moveTo(sx+5,   sy+16);
-    ctx.lineTo(sx+23,  sy+16);
-    ctx.lineTo(sx+27,  sy+38);
-    ctx.lineTo(sx+1,   sy+38);
-    ctx.closePath();
-    ctx.fill();
-  } else {
-    ctx.fillRect(sx+5, sy+16, 18, 20);
+  // Helper: draw a filled shape then overlay a left→right gradient for depth
+  function shade3D(drawShape, x0, y0, w0, h0) {
+    ctx.save();
+    drawShape();
+    ctx.clip();
+    const g = ctx.createLinearGradient(x0, 0, x0 + w0, 0);
+    g.addColorStop(0,    'rgba(255,255,255,0.38)');
+    g.addColorStop(0.38, 'rgba(255,255,255,0)');
+    g.addColorStop(1,    'rgba(0,0,0,0.28)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x0 - 2, y0 - 2, w0 + 4, h0 + 4);
+    ctx.restore();
   }
 
-  // Arms
-  ctx.fillStyle = sk;
-  ctx.fillRect(sx-7,  sy+18, 12, 7);
-  ctx.fillRect(sx+23, sy+18, 12, 7);
+  // Ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(sx + PL_W/2, GROUND + 3, 15, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
 
-  // Neck
+  // ── LEGS ────────────────────────────────────────────────
+  if (c.pants === 4) {
+    // Legs visible below skirt hem
+    ctx.fillStyle = sk;
+    ctx.fillRect(sx+5,  sy+36, 8, 20);
+    ctx.fillRect(sx+15, sy+36, 8, 20);
+
+    // Skirt trapezoid
+    const skirtCol = PANTS_COLORS[4];
+    ctx.fillStyle = skirtCol;
+    ctx.beginPath();
+    ctx.moveTo(sx+5,   sy+34);
+    ctx.lineTo(sx+23,  sy+34);
+    ctx.lineTo(sx+30,  sy+56);
+    ctx.lineTo(sx-2,   sy+56);
+    ctx.closePath();
+    ctx.fill();
+    // Skirt 3D shading
+    shade3D(() => {
+      ctx.beginPath();
+      ctx.moveTo(sx+5, sy+34); ctx.lineTo(sx+23, sy+34);
+      ctx.lineTo(sx+30, sy+56); ctx.lineTo(sx-2, sy+56);
+      ctx.closePath();
+    }, sx-2, sy+34, 34, 22);
+    // Fold lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+    ctx.lineWidth = 1;
+    [[sx+7,sy+34,sx+4,sy+56],[sx+14,sy+34,sx+14,sy+56],[sx+21,sy+34,sx+24,sy+56]]
+      .forEach(([x1,y1,x2,y2]) => {
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      });
+    // Legs below skirt
+    ctx.fillStyle = sk;
+    ctx.fillRect(sx+5,  sy+54, 9, 4);
+    ctx.fillRect(sx+15, sy+54, 9, 4);
+  } else {
+    const legCol = c.pants > 0 ? PANTS_COLORS[c.pants] : sk;
+    // Left leg
+    ctx.fillStyle = legCol;
+    ctx.fillRect(sx+4, sy+35, 10, 19);
+    shade3D(() => { ctx.rect(sx+4, sy+35, 10, 19); }, sx+4, sy+35, 10, 19);
+    // Right leg
+    ctx.fillStyle = legCol;
+    ctx.fillRect(sx+15, sy+35, 10, 19);
+    shade3D(() => { ctx.rect(sx+15, sy+35, 10, 19); }, sx+15, sy+35, 10, 19);
+    // Knee highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(sx+5,  sy+40, 4, 4);
+    ctx.fillRect(sx+16, sy+40, 4, 4);
+  }
+
+  // Shoes (rounded, 3D)
+  [[sx+2,sy+52],[sx+13,sy+52]].forEach(([bx,by]) => {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.beginPath(); ctx.roundRect(bx, by, 14, 5, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(bx+1, by+1, 5, 1);
+  });
+
+  // ── DRESS (top=4 overrides bottom entirely) ─────────────
+  if (c.top === 4) {
+    const dc = TOP_COLORS[4];
+    // Torso part of dress
+    ctx.fillStyle = dc;
+    ctx.fillRect(sx+5, sy+16, 18, 16);
+    shade3D(() => { ctx.rect(sx+5, sy+16, 18, 16); }, sx+5, sy+16, 18, 16);
+    // Skirt part of dress (trapezoid, covers legs)
+    ctx.fillStyle = dc;
+    ctx.beginPath();
+    ctx.moveTo(sx+4,  sy+31);
+    ctx.lineTo(sx+24, sy+31);
+    ctx.lineTo(sx+31, sy+57);
+    ctx.lineTo(sx-3,  sy+57);
+    ctx.closePath();
+    ctx.fill();
+    shade3D(() => {
+      ctx.beginPath();
+      ctx.moveTo(sx+4, sy+31); ctx.lineTo(sx+24, sy+31);
+      ctx.lineTo(sx+31, sy+57); ctx.lineTo(sx-3, sy+57); ctx.closePath();
+    }, sx-3, sy+31, 36, 26);
+    // Dress fold lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth = 1;
+    [[sx+8,sy+31,sx+5,sy+57],[sx+14,sy+31,sx+14,sy+57],[sx+20,sy+31,sx+23,sy+57]]
+      .forEach(([x1,y1,x2,y2]) => {
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      });
+  } else {
+    // Normal top (shirt / blouse)
+    const topCol = c.top > 0 ? TOP_COLORS[c.top] : sk;
+    ctx.fillStyle = topCol;
+    ctx.fillRect(sx+5, sy+16, 18, 20);
+    shade3D(() => { ctx.rect(sx+5, sy+16, 18, 20); }, sx+5, sy+16, 18, 20);
+    // Collar crease
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(sx+5, sy+34, 18, 2);
+  }
+
+  // ── ARMS ────────────────────────────────────────────────
+  ctx.fillStyle = sk;
+  ctx.beginPath(); ctx.roundRect(sx-7, sy+18, 12, 7, 3); ctx.fill();
+  shade3D(() => { ctx.roundRect(sx-7, sy+18, 12, 7, 3); }, sx-7, sy+18, 12, 7);
+  ctx.fillStyle = sk;
+  ctx.beginPath(); ctx.roundRect(sx+23, sy+18, 12, 7, 3); ctx.fill();
+  shade3D(() => { ctx.roundRect(sx+23, sy+18, 12, 7, 3); }, sx+23, sy+18, 12, 7);
+
+  // ── NECK ────────────────────────────────────────────────
   ctx.fillStyle = sk;
   ctx.fillRect(sx+10, sy+10, 8, 8);
 
-  // Head
+  // ── HEAD (sphere shading) ────────────────────────────────
   ctx.fillStyle = sk;
   ctx.beginPath(); ctx.arc(sx+14, sy+7, 13, 0, Math.PI*2); ctx.fill();
-  // Ear
-  ctx.fillRect(sx+1,  sy+5, 5, 6);
-  ctx.fillRect(sx+22, sy+5, 5, 6);
 
-  // Hair
+  // Sphere gradient overlay
+  ctx.save();
+  ctx.beginPath(); ctx.arc(sx+14, sy+7, 13, 0, Math.PI*2); ctx.clip();
+  const hg = ctx.createRadialGradient(sx+7, sy+1, 0, sx+14, sy+7, 15);
+  hg.addColorStop(0,   'rgba(255,255,255,0.55)');
+  hg.addColorStop(0.5, 'rgba(255,255,255,0)');
+  hg.addColorStop(1,   'rgba(0,0,0,0.32)');
+  ctx.fillStyle = hg;
+  ctx.fillRect(sx+1, sy-6, 26, 28);
+  ctx.restore();
+
+  // Ears (round, with inner shadow)
+  [sx+1, sx+25].forEach((ex, side) => {
+    ctx.fillStyle = sk;
+    ctx.beginPath(); ctx.arc(ex, sy+8, 4, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath(); ctx.arc(ex + (side===0?1:-1), sy+8, 2, 0, Math.PI*2); ctx.fill();
+  });
+
+  // ── HAIR ─────────────────────────────────────────────────
   if (c.hair > 0) {
-    ctx.fillStyle = HAIR_COLORS[c.hair - 1];
+    const hc = HAIR_COLORS[c.hair - 1];
+    ctx.fillStyle = hc;
     switch (c.hair) {
-      case 1: // short
-        ctx.fillRect(sx+2, sy-3, 24, 9);
+      case 1: { // Short cap
+        ctx.beginPath(); ctx.arc(sx+14, sy-1, 12, Math.PI, 0); ctx.fill();
+        ctx.fillRect(sx+2, sy-1, 24, 9);
+        // Highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+        ctx.beginPath(); ctx.arc(sx+9, sy-2, 4, Math.PI, 0); ctx.fill();
         break;
-      case 2: // long
-        ctx.fillRect(sx+2, sy-3, 24, 7);
-        ctx.fillRect(sx+2, sy+4, 4, 22);
-        ctx.fillRect(sx+22, sy+4, 4, 22);
+      }
+      case 2: { // Long
+        ctx.beginPath(); ctx.arc(sx+14, sy-1, 12, Math.PI, 0); ctx.fill();
+        ctx.fillRect(sx+2, sy-1, 24, 7);
+        ctx.beginPath(); ctx.roundRect(sx+2,  sy+5, 5, 26, [0,0,3,3]); ctx.fill();
+        ctx.beginPath(); ctx.roundRect(sx+21, sy+5, 5, 26, [0,0,3,3]); ctx.fill();
+        // Sheen
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath(); ctx.arc(sx+8, sy-1, 3, Math.PI, 0); ctx.fill();
         break;
-      case 3: // curly
+      }
+      case 3: { // Curly
         for (let ci = 0; ci < 4; ci++) {
-          ctx.beginPath();
-          ctx.arc(sx+2 + ci*8, sy, 5, Math.PI, 0);
-          ctx.fill();
+          ctx.fillStyle = hc;
+          ctx.beginPath(); ctx.arc(sx+2+ci*8, sy+1, 6, Math.PI, 0); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.2)';
+          ctx.beginPath(); ctx.arc(sx+0+ci*8, sy-1, 2, Math.PI, 0); ctx.fill();
         }
         break;
-      case 4: // afro
-        ctx.beginPath();
-        ctx.arc(sx+14, sy+5, 18, Math.PI, 0);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(sx+14, sy+5, 18, 0, Math.PI*2);
-        ctx.strokeStyle = HAIR_COLORS[c.hair - 1];
-        ctx.lineWidth = 1;
-        ctx.fill();
+      }
+      case 4: { // Afro
+        ctx.fillStyle = hc;
+        ctx.beginPath(); ctx.arc(sx+14, sy+5, 19, 0, Math.PI*2); ctx.fill();
+        // Texture bumps
+        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+        for (let a = 0; a < Math.PI*2; a += 0.7) {
+          ctx.beginPath();
+          ctx.arc(sx+14+Math.cos(a)*12, sy+5+Math.sin(a)*12, 4, 0, Math.PI*2);
+          ctx.fill();
+        }
+        // Sheen
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.beginPath(); ctx.arc(sx+8, sy-3, 5, 0, Math.PI*2); ctx.fill();
         break;
+      }
     }
   }
 
-  // Eyes
-  ctx.fillStyle = '#ecf0f1';
-  ctx.fillRect(sx+7, sy+3, 6, 5);
-  ctx.fillRect(sx+15, sy+3, 6, 5);
-  ctx.fillStyle = '#2c3e50';
-  ctx.fillRect(sx+9, sy+4, 3, 3);
-  ctx.fillRect(sx+17, sy+4, 3, 3);
+  // ── EYES ────────────────────────────────────────────────
+  // White sclera
   ctx.fillStyle = '#fff';
-  ctx.fillRect(sx+10, sy+5, 1, 1);
-  ctx.fillRect(sx+18, sy+5, 1, 1);
+  ctx.beginPath(); ctx.ellipse(sx+9,  sy+5, 4.5, 4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(sx+19, sy+5, 4.5, 4, 0, 0, Math.PI*2); ctx.fill();
+  // Iris
+  ctx.fillStyle = '#2c5f8a';
+  ctx.beginPath(); ctx.arc(sx+9,  sy+6, 2.8, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx+19, sy+6, 2.8, 0, Math.PI*2); ctx.fill();
+  // Pupil
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.arc(sx+9,  sy+6, 1.5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx+19, sy+6, 1.5, 0, Math.PI*2); ctx.fill();
+  // Catchlight
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(sx+10, sy+5, 0.9, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(sx+20, sy+5, 0.9, 0, Math.PI*2); ctx.fill();
+  // Eyelashes
+  ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.arc(sx+9,  sy+5, 4.5, Math.PI, 0); ctx.stroke();
+  ctx.beginPath(); ctx.arc(sx+19, sy+5, 4.5, Math.PI, 0); ctx.stroke();
 
-  // Mouth
-  ctx.fillStyle = '#e74c3c';
-  ctx.beginPath();
-  ctx.arc(sx+14, sy+13, 4, 0.1, Math.PI-0.1);
-  ctx.fill();
+  // ── EYEBROWS ─────────────────────────────────────────────
+  ctx.strokeStyle = c.hair > 0 ? HAIR_COLORS[c.hair-1] : '#4a3010';
+  ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(sx+5,  sy+0); ctx.lineTo(sx+13, sy-1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(sx+15, sy-1); ctx.lineTo(sx+23, sy+0); ctx.stroke();
+
+  // ── MOUTH ────────────────────────────────────────────────
+  ctx.strokeStyle = '#a93226'; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(sx+14, sy+12, 4, 0.15, Math.PI-0.15); ctx.stroke();
+  // Lip highlight
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.arc(sx+14, sy+12, 4, 0.15, Math.PI-0.15); ctx.stroke();
+
+  // ── NOSE ─────────────────────────────────────────────────
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath(); ctx.arc(sx+14, sy+9, 2, 0.3, Math.PI-0.3); ctx.fill();
 }
 
 function drawPlayer() {

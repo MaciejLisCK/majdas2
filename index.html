@@ -15,22 +15,35 @@
       min-height: 100vh;
       font-family: 'Segoe UI', Arial, sans-serif;
       user-select: none;
+      overflow-x: hidden;
+      padding: 8px 4px;
     }
     #hud {
       color: #fff;
-      font-size: 18px;
-      margin-bottom: 8px;
+      font-size: 16px;
+      margin-bottom: 6px;
       display: flex;
-      gap: 28px;
+      gap: 10px;
       align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+      max-width: 800px;
     }
-    #hud span { background: rgba(255,255,255,0.1); padding: 4px 14px; border-radius: 20px; }
+    #hud span { background: rgba(255,255,255,0.1); padding: 3px 12px; border-radius: 20px; }
     #hud strong { color: #f1c40f; }
-    canvas { display: block; border-radius: 8px; box-shadow: 0 0 40px rgba(0,0,0,0.6); }
+    canvas {
+      display: block;
+      border-radius: 8px;
+      box-shadow: 0 0 40px rgba(0,0,0,0.6);
+      width: 800px;
+      max-width: 100%;
+      aspect-ratio: 2 / 1;
+    }
     #controls {
       color: #888;
-      font-size: 13px;
-      margin-top: 8px;
+      font-size: 12px;
+      margin-top: 6px;
       text-align: center;
     }
     #touch-btns {
@@ -150,10 +163,10 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
 canvas.addEventListener('click', e => {
-  if (phase==='choice') {
-    const r = canvas.getBoundingClientRect();
-    handleChoiceClick(e.clientX - r.left, e.clientY - r.top);
-  }
+  const r = canvas.getBoundingClientRect();
+  const cx = (e.clientX - r.left) * (W / r.width);
+  const cy = (e.clientY - r.top)  * (H / r.height);
+  if (phase==='choice') handleChoiceClick(cx, cy);
   if (phase==='win') restart();
 });
 
@@ -805,6 +818,18 @@ function drawCharAt(sx, sy, c) {
   // ── NOSE ─────────────────────────────────────────────────
   ctx.fillStyle = 'rgba(0,0,0,0.12)';
   ctx.beginPath(); ctx.arc(sx+14, sy+9, 2, 0.3, Math.PI-0.3); ctx.fill();
+
+  // ── OUTLINE (keeps character visible on any background) ──
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(sx+14, sy+7, 13, 0, Math.PI*2); ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.strokeRect(sx+5, sy+16, 18, 20);
+  ctx.strokeRect(sx+4, sy+35, 10, 19);
+  ctx.strokeRect(sx+15,sy+35, 10, 19);
+  ctx.restore();
 }
 
 function drawPlayer() {

@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ludzik – Gra Customizacji</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      user-select: none;
+    }
+    #hud {
+      color: #fff;
+      font-size: 18px;
+      margin-bottom: 8px;
+      display: flex;
+      gap: 28px;
+      align-items: center;
+    }
+    #hud span { background: rgba(255,255,255,0.1); padding: 4px 14px; border-radius: 20px; }
+    #hud strong { color: #f1c40f; }
+    canvas { display: block; border-radius: 8px; box-shadow: 0 0 40px rgba(0,0,0,0.6); }
+    #controls {
+      color: #888;
+      font-size: 13px;
+      margin-top: 8px;
+      text-align: center;
+    }
+    #touch-btns {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .tbtn {
+      background: rgba(255,255,255,0.15);
+      border: 2px solid rgba(255,255,255,0.3);
+      color: #fff;
+      font-size: 22px;
+      width: 54px;
+      height: 54px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tbtn:active { background: rgba(255,255,255,0.35); }
+  </style>
+</head>
+<body>
+
+<div id="hud">
+  <span>Punkty: <strong id="scoreEl">0</strong></span>
+  <span>Etap: <strong id="stageEl">1</strong>/5</span>
+  <span id="stageNameEl" style="color:#f39c12;">Różowy</span>
+</div>
+<canvas id="c" width="800" height="400"></canvas>
+<div id="controls">← → / A D – ruch &nbsp;|&nbsp; ↑ / W / Spacja – skok</div>
+<div id="touch-btns">
+  <div class="tbtn" id="btn-left">◀</div>
+  <div class="tbtn" id="btn-jump">▲</div>
+  <div class="tbtn" id="btn-right">▶</div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+//  Constants
+// ─────────────────────────────────────────────────────────
+const W = 800, H = 400;
+const GROUND = 345;
+const GRAVITY = 0.6;
+const JUMP_V = -14;
+const LEVEL_W = 1900;
+const PL_W = 28, PL_H = 54;
+const BLOCK_SIZE = 46;
+
+const STAGE_BG    = ['#FFB6D9','#FFF176','#B3E5FC','#C8E6C9','#FFCDD2'];
+const STAGE_TILE  = ['#F06292','#F9A825','#0288D1','#388E3C','#E53935'];
+const STAGE_DARK  = ['#C2185B','#F57F17','#01579B','#1B5E20','#B71C1C'];
+const STAGE_NAMES = ['Różowy','Żółty','Niebieski','Zielony','Czerwony'];
+
+const SKIN_COLORS  = ['#FFE4C8','#F5C29A','#C8956C','#8D5524','#5C3317'];
+const HAIR_COLORS  = ['#5a3010','#222','#c9a227','#e74c3c','#8e44ad'];
+const PANTS_COLORS = ['','#1a3a8c','#4fc3f7','#555','#e91e8c'];
+const TOP_COLORS   = ['','#e74c3c','#2980b9','#27ae60','#9b59b6'];
+
+const CHOICES = [
+  { key:'hair',  label:'Fryzura',      options:['Łysy','Krótkie','Długie','Kręcone','Afro'],        emojis:['🚫','💇','👱','🌀','✨'] },
+  { key:'skin',  label:'Kolor skóry',  options:['Biały','Jasny','Oliwkowy','Brązowy','Ciemny'],      emojis:['⬜','🟡','🟤','🟫','⬛'] },
+  { key:'pants', label:'Spodnie',      options:['Brak','Jeansy','Szorty','Dresy','Spódnica'],        emojis:['🚫','👖','🩳','🏃','👗'] },
+  { key:'top',   label:'Góra',         options:['Brak','T-shirt','Bluza','Koszula','Sukienka'],      emojis:['🚫','👕','🧥','👔','👗'] },
+];
+
+// ─────────────────────────────────────────────────────────
+//  State
+// ─────────────────────────────────────────────────────────
+let score = 0, stageIdx = 0;
+let char = { hair:0, skin:0, pants:0, top:0 };
+let phase = 'game'; // 'game' | 'choice' | 'stageDone' | 'win'
+let activeChoice = null;
+let stageDoneTimer = 0;
+let camX = 0;
+
+let pl = { x:0, y:0, vx:0, vy:0, onGround:false };
+
+let obstacles = [];
+let choiceOrbs = [];
+
+// ─────────────────────────────────────────────────────────
+//  Input
+// ─────────────────────────────────────────────────────────
+const keys = {};
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if ((e.code==='ArrowUp'||e.code==='KeyW'||e.code==='Space') && pl.onGround && phase==='game') {
+    pl.vy = JUMP_V; pl.onGround = false;
+    e.preventDefault();
+  }
+  if (phase==='choice' && activeChoice) {
+    const n = parseInt(e.key);
+    if (n>=1 && n<=activeChoice.def.options.length) confirmChoice(n-1);
+  }
+  if (phase==='win' && (e.code==='Space'||e.code==='Enter')) restart();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// Touch buttons
+function setTouchKey(id, code, jumpCode) {
+  const el = document.getElementById(id);
+  el.addEventListener('touchstart', e => { e.preventDefault(); keys[code]=true; if(jumpCode&&pl.onGround&&phase==='game'){pl.vy=JUMP_V;pl.onGround=false;} }, {passive:false});
+  el.addEventListener('touchend',   e => { e.preventDefault(); keys[code]=false; }, {passive:false});
+  el.addEventListener('mousedown',  e => { keys[code]=true; if(jumpCode&&pl.onGround&&phase==='game'){pl.vy=JUMP_V;pl.onGround=false;} });
+  el.addEventListener('mouseup',    e => { keys[code]=false; });
+}
+setTouchKey('btn-left',  'ArrowLeft',  false);
+setTouchKey('btn-right', 'ArrowRight', false);
+setTouchKey('btn-jump',  'ArrowUp',    true);
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+canvas.addEventListener('click', e => {
+  if (phase==='choice') {
+    const r = canvas.getBoundingClientRect();
+    handleChoiceClick(e.clientX - r.left, e.clientY - r.top);
+  }
+  if (phase==='win') restart();
+});
+
+// ─────────────────────────────────────────────────────────
+//  Level building
+// ─────────────────────────────────────────────────────────
+function buildLevel() {
+  obstacles = [];
+  choiceOrbs = [];
+  const heights = [90, 110, 80, 100];
+  const xs      = [380, 680, 1030, 1380];
+  xs.forEach((ox, i) => {
+    const oh = heights[i];
+    obstacles.push({ x:ox, y:GROUND-oh, w:34, h:oh, passed:false });
+    choiceOrbs.push({ x:ox+90, choiceIdx:i, done:false, pulse:0 });
+  });
+}
+
+function initStage() {
+  buildLevel();
+  pl.x = 60; pl.y = GROUND - PL_H;
+  pl.vx = 0; pl.vy = 0; pl.onGround = true;
+  camX = 0; phase = 'game'; activeChoice = null;
+  document.getElementById('stageEl').textContent = stageIdx + 1;
+  document.getElementById('stageNameEl').textContent = STAGE_NAMES[stageIdx];
+}
+
+// ─────────────────────────────────────────────────────────
+//  Choice logic
+// ─────────────────────────────────────────────────────────
+function confirmChoice(optIdx) {
+  if (!activeChoice) return;
+  char[activeChoice.def.key] = optIdx;
+  activeChoice.orb.done = true;
+  activeChoice = null;
+  phase = 'game';
+}
+
+function handleChoiceClick(cx, cy) {
+  if (!activeChoice) return;
+  const opts = activeChoice.def.options;
+  const menuW = 560, menuX = (W - menuW) / 2;
+  const menuY = 50;
+  const btnH = 50, gap = 8;
+  opts.forEach((_, i) => {
+    const bx = menuX + 20, by = menuY + 60 + i*(btnH+gap);
+    if (cx>=bx && cx<=bx+(menuW-40) && cy>=by && cy<=by+btnH) confirmChoice(i);
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+//  Physics & Update
+// ─────────────────────────────────────────────────────────
+function rectsOverlap(ax,ay,aw,ah, bx,by,bw,bh) {
+  return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
+}
+
+function update(dt) {
+  if (phase === 'stageDone') {
+    stageDoneTimer -= dt;
+    if (stageDoneTimer <= 0) {
+      stageIdx++;
+      if (stageIdx >= 5) { score = 1000; document.getElementById('scoreEl').textContent=score; phase='win'; }
+      else initStage();
+    }
+    return;
+  }
+  if (phase !== 'game') return;
+
+  // Horizontal
+  let mx = 0;
+  if (keys['ArrowLeft']||keys['KeyA']) mx = -1;
+  if (keys['ArrowRight']||keys['KeyD']) mx = 1;
+  pl.vx = mx * 4.2;
+  pl.x += pl.vx;
+  if (pl.x < 0) pl.x = 0;
+  if (pl.x + PL_W > LEVEL_W) pl.x = LEVEL_W - PL_W;
+
+  // X obstacle collision
+  for (const obs of obstacles) {
+    if (obs.passed) continue;
+    if (rectsOverlap(pl.x, pl.y, PL_W, PL_H, obs.x, obs.y, obs.w, obs.h)) {
+      if (pl.vx > 0) pl.x = obs.x - PL_W;
+      else if (pl.vx < 0) pl.x = obs.x + obs.w;
+    }
+  }
+
+  // Vertical
+  pl.vy += GRAVITY;
+  pl.y  += pl.vy;
+  pl.onGround = false;
+
+  if (pl.y + PL_H >= GROUND) { pl.y = GROUND - PL_H; pl.vy = 0; pl.onGround = true; }
+
+  // Y obstacle collision (landing on top / hitting head)
+  for (const obs of obstacles) {
+    if (obs.passed) continue;
+    if (rectsOverlap(pl.x, pl.y, PL_W, PL_H, obs.x, obs.y, obs.w, obs.h)) {
+      if (pl.vy > 0) { pl.y = obs.y - PL_H; pl.vy = 0; pl.onGround = true; }
+      else           { pl.y = obs.y + obs.h; pl.vy = 0; }
+    }
+  }
+
+  // Mark passed
+  for (const obs of obstacles) {
+    if (!obs.passed && pl.x >= obs.x + obs.w) obs.passed = true;
+  }
+
+  // Orb pulse & trigger
+  for (let i = 0; i < choiceOrbs.length; i++) {
+    const orb = choiceOrbs[i];
+    if (orb.done) continue;
+    orb.pulse = (orb.pulse + dt * 0.004) % (Math.PI * 2);
+    if (!obstacles[i].passed) continue;
+    const orbCX = orb.x + 16, plCX = pl.x + PL_W / 2;
+    if (Math.abs(plCX - orbCX) < 40) {
+      phase = 'choice';
+      activeChoice = { orb, def: CHOICES[orb.choiceIdx] };
+    }
+  }
+
+  // Camera
+  camX = Math.max(0, Math.min(pl.x - W/3, LEVEL_W - W));
+
+  // End of stage
+  if (obstacles.every(o => o.passed) && pl.x + PL_W > LEVEL_W - 80) {
+    score += 200;
+    document.getElementById('scoreEl').textContent = score;
+    phase = 'stageDone';
+    stageDoneTimer = 2200;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  Drawing
+// ─────────────────────────────────────────────────────────
+function drawScene() {
+  const bg   = STAGE_BG[stageIdx];
+  const tile  = STAGE_TILE[stageIdx];
+  const dark  = STAGE_DARK[stageIdx];
+
+  // Sky
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Checkerboard overlay
+  const BS = BLOCK_SIZE;
+  for (let bx = -((camX|0) % BS); bx < W + BS; bx += BS) {
+    for (let by = 0; by < GROUND; by += BS) {
+      if ((Math.floor((bx + camX)/BS) + Math.floor(by/BS)) % 2 === 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.06)';
+        ctx.fillRect(bx, by, BS, BS);
+      }
+    }
+  }
+
+  // Ground tiles
+  for (let bx = -((camX|0) % BS); bx < W + BS; bx += BS) {
+    ctx.fillStyle = tile;
+    ctx.fillRect(bx, GROUND, BS, BS);
+    ctx.fillStyle = dark;
+    ctx.fillRect(bx, GROUND, BS, 5);
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(bx, GROUND, BS, 2);
+
+    ctx.fillStyle = dark;
+    ctx.fillRect(bx, GROUND + BS, BS, H);
+  }
+  // Tile grid lines
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 1;
+  for (let bx = -((camX|0) % BS); bx < W + BS; bx += BS) {
+    ctx.beginPath(); ctx.moveTo(bx, GROUND); ctx.lineTo(bx, H); ctx.stroke();
+  }
+
+  // Obstacles (brick wall)
+  for (const obs of obstacles) {
+    if (obs.passed) continue;
+    const sx = obs.x - camX;
+    if (sx > W + 10 || sx + obs.w < -10) continue;
+    ctx.fillStyle = '#c0392b';
+    ctx.fillRect(sx, obs.y, obs.w, obs.h);
+    ctx.fillStyle = '#962d22';
+    const rh = 14;
+    for (let row = 0; row < obs.h; row += rh) {
+      const off = Math.floor(row/rh) % 2 === 0 ? 0 : 16;
+      for (let col = off - 32; col < obs.w + 10; col += 34) {
+        ctx.strokeStyle = '#7d241e';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx + col, obs.y + row, 33, rh - 1);
+      }
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(sx, obs.y, obs.w, 3);
+  }
+
+  // Choice orbs
+  for (let i = 0; i < choiceOrbs.length; i++) {
+    const orb = choiceOrbs[i];
+    if (orb.done) continue;
+    if (!obstacles[i].passed) continue;
+    const sx = orb.x - camX;
+    if (sx < -40 || sx > W + 40) continue;
+    const cy = GROUND - 38 + Math.sin(orb.pulse) * 5;
+
+    // Glow ring
+    const grad = ctx.createRadialGradient(sx+16, cy, 4, sx+16, cy, 28);
+    grad.addColorStop(0, 'rgba(255,220,50,0.6)');
+    grad.addColorStop(1, 'rgba(255,200,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(sx+16, cy, 28, 0, Math.PI*2); ctx.fill();
+
+    // Orb body
+    ctx.fillStyle = '#f39c12';
+    ctx.beginPath(); ctx.arc(sx+16, cy, 16, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath(); ctx.arc(sx+10, cy-6, 5, 0, Math.PI*2); ctx.fill();
+
+    // ?
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('?', sx+16, cy+6);
+
+    // Label
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = 'bold 11px Arial';
+    ctx.fillText(CHOICES[i].label, sx+16, GROUND - 10);
+  }
+
+  // End flag
+  const flagX = LEVEL_W - 90 - camX;
+  if (flagX < W + 30 && flagX > -60) {
+    ctx.fillStyle = '#555';
+    ctx.fillRect(flagX, GROUND - 90, 5, 90);
+    ctx.fillStyle = '#2ecc71';
+    ctx.fillRect(flagX+5, GROUND-90, 40, 26);
+    ctx.fillStyle = '#27ae60';
+    ctx.fillRect(flagX+5, GROUND-90, 40, 4);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('META', flagX+25, GROUND-71);
+    // Stars
+    for (let s = 0; s < 3; s++) {
+      ctx.fillStyle = '#f1c40f';
+      ctx.font = '16px Arial';
+      ctx.fillText('★', flagX + 5 + s*15, GROUND - 100 - Math.abs(Math.sin(Date.now()*0.002 + s))*8);
+    }
+  }
+}
+
+// ─── Character drawing ────────────────────────────────────
+function drawCharAt(sx, sy, c) {
+  const sk = SKIN_COLORS[c.skin];
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath();
+  ctx.ellipse(sx + PL_W/2, GROUND+3, 14, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Legs
+  const legCol = c.pants > 0 ? PANTS_COLORS[c.pants] : sk;
+  ctx.fillStyle = legCol;
+  ctx.fillRect(sx+4,  sy+35, 9, 19);
+  ctx.fillRect(sx+15, sy+35, 9, 19);
+  // Shoes
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(sx+2,  sy+52, 13, 4);
+  ctx.fillRect(sx+13, sy+52, 13, 4);
+
+  // Body / top
+  const topCol = c.top > 0 ? TOP_COLORS[c.top] : sk;
+  ctx.fillStyle = topCol;
+  if (c.top === 4) { // dress
+    ctx.beginPath();
+    ctx.moveTo(sx+5,   sy+16);
+    ctx.lineTo(sx+23,  sy+16);
+    ctx.lineTo(sx+27,  sy+38);
+    ctx.lineTo(sx+1,   sy+38);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillRect(sx+5, sy+16, 18, 20);
+  }
+
+  // Arms
+  ctx.fillStyle = sk;
+  ctx.fillRect(sx-7,  sy+18, 12, 7);
+  ctx.fillRect(sx+23, sy+18, 12, 7);
+
+  // Neck
+  ctx.fillStyle = sk;
+  ctx.fillRect(sx+10, sy+10, 8, 8);
+
+  // Head
+  ctx.fillStyle = sk;
+  ctx.beginPath(); ctx.arc(sx+14, sy+7, 13, 0, Math.PI*2); ctx.fill();
+  // Ear
+  ctx.fillRect(sx+1,  sy+5, 5, 6);
+  ctx.fillRect(sx+22, sy+5, 5, 6);
+
+  // Hair
+  if (c.hair > 0) {
+    ctx.fillStyle = HAIR_COLORS[c.hair - 1];
+    switch (c.hair) {
+      case 1: // short
+        ctx.fillRect(sx+2, sy-3, 24, 9);
+        break;
+      case 2: // long
+        ctx.fillRect(sx+2, sy-3, 24, 7);
+        ctx.fillRect(sx+2, sy+4, 4, 22);
+        ctx.fillRect(sx+22, sy+4, 4, 22);
+        break;
+      case 3: // curly
+        for (let ci = 0; ci < 4; ci++) {
+          ctx.beginPath();
+          ctx.arc(sx+2 + ci*8, sy, 5, Math.PI, 0);
+          ctx.fill();
+        }
+        break;
+      case 4: // afro
+        ctx.beginPath();
+        ctx.arc(sx+14, sy+5, 18, Math.PI, 0);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(sx+14, sy+5, 18, 0, Math.PI*2);
+        ctx.strokeStyle = HAIR_COLORS[c.hair - 1];
+        ctx.lineWidth = 1;
+        ctx.fill();
+        break;
+    }
+  }
+
+  // Eyes
+  ctx.fillStyle = '#ecf0f1';
+  ctx.fillRect(sx+7, sy+3, 6, 5);
+  ctx.fillRect(sx+15, sy+3, 6, 5);
+  ctx.fillStyle = '#2c3e50';
+  ctx.fillRect(sx+9, sy+4, 3, 3);
+  ctx.fillRect(sx+17, sy+4, 3, 3);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(sx+10, sy+5, 1, 1);
+  ctx.fillRect(sx+18, sy+5, 1, 1);
+
+  // Mouth
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath();
+  ctx.arc(sx+14, sy+13, 4, 0.1, Math.PI-0.1);
+  ctx.fill();
+}
+
+function drawPlayer() {
+  drawCharAt(pl.x - camX, pl.y, char);
+}
+
+// ─── Choice menu ─────────────────────────────────────────
+function drawChoiceMenu() {
+  if (!activeChoice) return;
+  const def = activeChoice.def;
+  const opts = def.options;
+  const mw = 560, mh = 66 + opts.length * 58 + 16;
+  const mx = (W - mw) / 2, my = (H - mh) / 2 - 20;
+
+  // Backdrop
+  ctx.fillStyle = 'rgba(15,15,40,0.93)';
+  ctx.beginPath(); ctx.roundRect(mx, my, mw, mh, 18); ctx.fill();
+  ctx.strokeStyle = '#f39c12'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.roundRect(mx, my, mw, mh, 18); ctx.stroke();
+
+  // Title
+  ctx.fillStyle = '#f39c12';
+  ctx.font = 'bold 26px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText(`✦ ${def.label} ✦`, mx + mw/2, my + 42);
+
+  // Options
+  opts.forEach((opt, i) => {
+    const bx = mx + 20, by = my + 62 + i * 58, bw = mw - 40, bh = 48;
+    const hover = false;
+    ctx.fillStyle = '#1a2a4a';
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill();
+    ctx.strokeStyle = '#2980b9'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.stroke();
+
+    ctx.fillStyle = '#f39c12';
+    ctx.font = 'bold 17px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${i+1}.`, bx+14, by+30);
+
+    ctx.fillStyle = '#ecf0f1';
+    ctx.font = '20px Arial';
+    ctx.fillText(def.emojis[i], bx+44, by+31);
+
+    ctx.font = '18px Arial';
+    ctx.fillText(opt, bx+76, by+30);
+  });
+
+  ctx.fillStyle = '#7f8c8d';
+  ctx.font = '13px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Naciśnij 1–' + opts.length + ' lub kliknij', mx + mw/2, my + mh - 8);
+}
+
+// ─── Overlays ─────────────────────────────────────────────
+function drawStageDone() {
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#f1c40f';
+  ctx.font = 'bold 54px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('Etap ukończony!', W/2, H/2 - 20);
+  ctx.fillStyle = '#2ecc71';
+  ctx.font = '28px Arial';
+  ctx.fillText('+200 punktów', W/2, H/2 + 36);
+  ctx.fillStyle = STAGE_NAMES[stageIdx] ? '#fff' : '#fff';
+  ctx.font = '20px Arial';
+  if (stageIdx + 1 < 5)
+    ctx.fillText(`Następny etap: ${STAGE_NAMES[stageIdx+1]}`, W/2, H/2 + 78);
+}
+
+function drawWin() {
+  ctx.fillStyle = 'rgba(10,10,30,0.94)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  for (let s = 0; s < 60; s++) {
+    const sx = (s * 137.5) % W;
+    const sy2 = (s * 97.3) % (H * 0.6);
+    const r = 1 + (s % 3);
+    ctx.fillStyle = `rgba(255,220,60,${0.4 + (s%5)*0.1})`;
+    ctx.beginPath(); ctx.arc(sx, sy2, r, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle = '#f1c40f';
+  ctx.font = 'bold 68px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('WYGRAŁEŚ!', W/2, 120);
+
+  ctx.fillStyle = '#2ecc71';
+  ctx.font = 'bold 44px Arial';
+  ctx.fillText('1 000 punktów!', W/2, 186);
+
+  // Show final character
+  drawCharAt(W/2 - PL_W/2, H/2 - 10, char);
+
+  ctx.fillStyle = '#bdc3c7';
+  ctx.font = '20px Arial';
+  ctx.fillText('Spacja lub kliknij, aby zagrać ponownie', W/2, H - 30);
+}
+
+function drawHUD() {
+  // Stage name banner (top-right on canvas)
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.roundRect(10, 10, 180, 28, 8); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '15px Arial';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Etap ${stageIdx+1}: ${STAGE_NAMES[stageIdx]}`, 20, 29);
+
+  // Mini progress dots
+  for (let s = 0; s < 5; s++) {
+    ctx.fillStyle = s <= stageIdx ? '#f1c40f' : 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(W - 40 + (s - 2)*14, 22, 5, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+// ─── Restart ──────────────────────────────────────────────
+function restart() {
+  score = 0; stageIdx = 0;
+  char = { hair:0, skin:0, pants:0, top:0 };
+  document.getElementById('scoreEl').textContent = 0;
+  initStage();
+}
+
+// ─── Main loop ────────────────────────────────────────────
+let lastT = 0;
+function frame(ts) {
+  const dt = Math.min(ts - lastT, 50);
+  lastT = ts;
+
+  update(dt);
+
+  drawScene();
+  drawPlayer();
+  if (phase === 'choice')    drawChoiceMenu();
+  if (phase === 'stageDone') drawStageDone();
+  if (phase === 'win')       drawWin();
+  drawHUD();
+
+  requestAnimationFrame(frame);
+}
+
+initStage();
+requestAnimationFrame(ts => { lastT = ts; requestAnimationFrame(frame); });
+</script>
+</body>
+</html>
